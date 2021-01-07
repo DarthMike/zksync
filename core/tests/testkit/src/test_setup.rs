@@ -16,6 +16,7 @@ use zksync_types::{
 use web3::types::TransactionReceipt;
 use zksync_crypto::proof::EncodedProofPlonk;
 use zksync_crypto::rand::Rng;
+use zksync_crypto::Fr;
 use zksync_types::block::Block;
 
 use crate::account_set::AccountSet;
@@ -40,6 +41,7 @@ pub struct TestSetup {
     pub expected_changes_for_current_block: ExpectedAccountState,
 
     pub commit_account: EthereumAccount<Http>,
+    pub current_state_root: Option<Fr>,
 }
 
 impl TestSetup {
@@ -59,6 +61,7 @@ impl TestSetup {
             tokens,
             expected_changes_for_current_block: ExpectedAccountState::default(),
             commit_account,
+            current_state_root: None,
         }
     }
 
@@ -624,6 +627,7 @@ impl TestSetup {
             .expect("sk receiver dropped");
 
         let new_block = self.await_for_block_commit_request().await;
+        self.current_state_root = Some(new_block.block.new_root_hash);
 
         (
             self.commit_account
@@ -655,6 +659,8 @@ impl TestSetup {
             .expect("sk receiver dropped");
 
         let new_block = self.await_for_block_commit_request().await;
+
+        self.current_state_root = Some(new_block.block.new_root_hash);
 
         let commit_result = self
             .commit_account
@@ -844,7 +850,12 @@ impl TestSetup {
             .get_account_id()
             .expect("Account should have id to exit");
         // restore account state
-        zksync_prover::exit_proof::create_exit_proof(accounts, owner_id, owner.address, token.0)
-            .expect("Failed to generate exit proof")
+        zksync_prover_utils::exit_proof::create_exit_proof(
+            accounts,
+            owner_id,
+            owner.address,
+            token.0,
+        )
+        .expect("Failed to generate exit proof")
     }
 }

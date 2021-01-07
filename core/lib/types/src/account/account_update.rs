@@ -13,6 +13,7 @@ pub enum AccountUpdate {
     Create { address: Address, nonce: Nonce },
     /// Delete an existing account.
     /// Note: Currently this kind of update is not used directly in the network.
+    /// However, it's used to revert made operation (e.g. to restore state back in time from the last verified block).
     Delete { address: Address, nonce: Nonce },
     /// Change the account balance.
     UpdateBalance {
@@ -61,8 +62,8 @@ impl AccountUpdate {
                 old_nonce,
                 new_nonce,
             } => AccountUpdate::ChangePubKeyHash {
-                old_pub_key_hash: new_pub_key_hash.clone(),
-                new_pub_key_hash: old_pub_key_hash.clone(),
+                old_pub_key_hash: *new_pub_key_hash,
+                new_pub_key_hash: *old_pub_key_hash,
                 old_nonce: *new_nonce,
                 new_nonce: *old_nonce,
             },

@@ -6,7 +6,9 @@ on:
 
 jobs:
   build-images:
-    runs-on: self-hosted
+    # We currently have two self-hosted runners, one of which is marked "DEV-CI" and other one is marder "MAIN".
+    # "MAIN" is the current CI runner, "DEV-CI" is currently used to experiment with CI optimizing.
+    runs-on: [self-hosted, MAIN]
 
     steps:
     - uses: actions/checkout@v2
@@ -19,7 +21,7 @@ jobs:
 
     - name: init
       run: |
-        cargo sqlx --version || cargo install --version=0.1.0-beta.1 sqlx-cli
+        cargo sqlx --version || cargo install --version=0.2.0 sqlx-cli
         zk
         zk run yarn
         cp etc/tokens/{test,localhost}.json

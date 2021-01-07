@@ -14,7 +14,7 @@ publish = false # We don't want to publish our binaries.
 db_test = []
 
 [dependencies]
-num = { version = "0.2", features = ["serde"] }
+num = { version = "0.3.1", features = ["serde"] }
 tiny-keccak = "1.4.2"
 ethabi = "12.0.0"
 web3 = "0.13.0"
@@ -27,6 +27,7 @@ anyhow = "1.0"
 structopt = "0.3.20"
 chrono = { version = "0.4", features = ["serde", "rustc-serialize"] }
 tokio = { version = "0.2", features = ["full"] }
+async-trait = "0.1"
 
 zksync_state = { path = "../../lib/state", version = "1.0" }
 zksync_types = { path = "../../lib/types", version = "1.0" }

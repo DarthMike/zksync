@@ -5,11 +5,11 @@
 //! scope configuration. This is done by the `ApiV01::into_scope` method.
 
 use crate::api_server::{
+    helpers::try_parse_hash,
     rest::{
-        helpers::*,
+        helpers::{deposit_op_to_tx_by_hash, parse_tx_id, priority_op_to_tx_history},
         v01::{api_decl::ApiV01, types::*},
     },
-    rpc_server::get_ongoing_priority_ops,
 };
 use actix_web::{web, HttpResponse, Result as ActixResult};
 use std::time::Instant;
@@ -27,14 +27,14 @@ impl ApiV01 {
     pub async fn testnet_config(self_: web::Data<Self>) -> ActixResult<HttpResponse> {
         let start = Instant::now();
         let contract_address = self_.contract_address.clone();
-        metrics::histogram!("api", start.elapsed(), "v01" => "testnet_config");
+        metrics::histogram!("api.v01.testnet_config", start.elapsed());
         ok_json!(TestnetConfigResponse { contract_address })
     }
 
     pub async fn status(self_: web::Data<Self>) -> ActixResult<HttpResponse> {
         let start = Instant::now();
         let result = ok_json!(self_.network_status.read().await);
-        metrics::histogram!("api", start.elapsed(), "v01" => "status");
+        metrics::histogram!("api.v01.status", start.elapsed());
         result
     }
 
@@ -50,7 +50,7 @@ impl ApiV01 {
         let mut vec_tokens = tokens.values().cloned().collect::<Vec<_>>();
         vec_tokens.sort_by_key(|t| t.id);
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "tokens");
+        metrics::histogram!("api.v01.tokens", start.elapsed());
         ok_json!(vec_tokens)
     }
 
@@ -82,7 +82,9 @@ impl ApiV01 {
             })?;
 
         // Fetch ongoing deposits, since they must be reported within the transactions history.
-        let mut ongoing_ops = get_ongoing_priority_ops(&self_.api_client, address)
+        let mut ongoing_ops = self_
+            .api_client
+            .get_unconfirmed_deposits(address)
             .await
             .map_err(|err| {
                 vlog::warn!(
@@ -96,13 +98,13 @@ impl ApiV01 {
             })?;
 
         // Sort operations by block number from smaller (older) to greater (newer).
-        ongoing_ops.sort_by(|lhs, rhs| rhs.0.cmp(&lhs.0));
+        ongoing_ops.sort_by(|lhs, rhs| rhs.eth_block.cmp(&lhs.eth_block));
 
         // Collect the unconfirmed priority operations with respect to the
         // `offset` and `limit` parameters.
         let mut ongoing_transactions_history: Vec<_> = ongoing_ops
             .iter()
-            .map(|(block, op)| priority_op_to_tx_history(&tokens, *block, op))
+            .map(|op| priority_op_to_tx_history(&tokens, op.eth_block, op))
             .skip(offset as usize)
             .take(limit as usize)
             .collect();
@@ -144,7 +146,7 @@ impl ApiV01 {
         // goes from oldest tx to the newest tx.
         transactions_history.append(&mut ongoing_transactions_history);
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "tx_history");
+        metrics::histogram!("api.v01.tx_history", start.elapsed());
         ok_json!(transactions_history)
     }
 
@@ -185,7 +187,7 @@ impl ApiV01 {
 
         transaction.commit().await.map_err(Self::db_error)?;
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "tx_history_older_than");
+        metrics::histogram!("api.v01.tx_history_older_than", start.elapsed());
         ok_json!(transactions_history)
     }
 
@@ -231,7 +233,9 @@ impl ApiV01 {
             // fill the rest of the limit.
 
             // Fetch ongoing deposits, since they must be reported within the transactions history.
-            let mut ongoing_ops = get_ongoing_priority_ops(&self_.api_client, address)
+            let mut ongoing_ops = self_
+                .api_client
+                .get_unconfirmed_deposits(address)
                 .await
                 .map_err(|err| {
                     vlog::warn!(
@@ -245,7 +249,7 @@ impl ApiV01 {
                 })?;
 
             // Sort operations by block number from smaller (older) to greater (newer).
-            ongoing_ops.sort_by(|lhs, rhs| rhs.0.cmp(&lhs.0));
+            ongoing_ops.sort_by(|lhs, rhs| rhs.eth_block.cmp(&lhs.eth_block));
 
             let tokens = self_
                 .access_storage()
@@ -267,7 +271,7 @@ impl ApiV01 {
             // `limit` parameters.
             let mut txs: Vec<_> = ongoing_ops
                 .iter()
-                .map(|(block, op)| priority_op_to_tx_history(&tokens, *block, op))
+                .map(|op| priority_op_to_tx_history(&tokens, op.eth_block, op))
                 .take(limit as usize)
                 .collect();
 
@@ -277,7 +281,7 @@ impl ApiV01 {
             transactions_history.append(&mut txs);
         }
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "tx_history_newer_than");
+        metrics::histogram!("api.v01.tx_history_newer_than", start.elapsed());
         ok_json!(transactions_history)
     }
 
@@ -294,7 +298,7 @@ impl ApiV01 {
 
         let tx_receipt = self_.get_tx_receipt(transaction_hash).await?;
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "executed_tx_by_hash");
+        metrics::histogram!("api.v01.executed_tx_by_hash", start.elapsed());
         ok_json!(tx_receipt)
     }
 
@@ -304,7 +308,7 @@ impl ApiV01 {
     ) -> ActixResult<HttpResponse> {
         let start = Instant::now();
         let hash = try_parse_hash(&hash_hex_with_prefix)
-            .ok_or_else(|| HttpResponse::BadRequest().finish())?;
+            .map_err(|_| HttpResponse::BadRequest().finish())?;
 
         let mut res = self_
             .access_storage()
@@ -357,7 +361,7 @@ impl ApiV01 {
             res = deposit_op_to_tx_by_hash(&tokens, &priority_op, eth_block);
         }
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "tx_by_hash");
+        metrics::histogram!("api.v01.tx_by_hash", start.elapsed());
         ok_json!(res)
     }
 
@@ -367,7 +371,7 @@ impl ApiV01 {
     ) -> ActixResult<HttpResponse> {
         let start = Instant::now();
         let receipt = self_.get_priority_op_receipt(pq_id).await?;
-        metrics::histogram!("api", start.elapsed(), "v01" => "priority_op");
+        metrics::histogram!("api.v01.priority_op", start.elapsed());
         ok_json!(receipt)
     }
 
@@ -384,7 +388,7 @@ impl ApiV01 {
             Err(HttpResponse::NotFound().finish().into())
         };
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "block_tx");
+        metrics::histogram!("api.v01.block_tx", start.elapsed());
         result
     }
 
@@ -416,7 +420,7 @@ impl ApiV01 {
                 HttpResponse::InternalServerError().finish()
             })?;
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "blocks");
+        metrics::histogram!("api.v01.blocks", start.elapsed());
         ok_json!(resp)
     }
 
@@ -431,7 +435,7 @@ impl ApiV01 {
         } else {
             Err(HttpResponse::NotFound().finish().into())
         };
-        metrics::histogram!("api", start.elapsed(), "v01" => "block_by_id");
+        metrics::histogram!("api.v01.block_by_id", start.elapsed());
         result
     }
 
@@ -452,7 +456,7 @@ impl ApiV01 {
                 HttpResponse::InternalServerError().finish()
             })?;
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "block_transactions");
+        metrics::histogram!("api.v01.block_transactions", start.elapsed());
         ok_json!(txs)
     }
 
@@ -469,7 +473,7 @@ impl ApiV01 {
             Err(HttpResponse::NotFound().finish().into())
         };
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "explorer_search");
+        metrics::histogram!("api.v01.explorer_search", start.elapsed());
         result
     }
 
@@ -485,7 +489,7 @@ impl ApiV01 {
                 .as_secs(),
         };
 
-        metrics::histogram!("api", start.elapsed(), "v01" => "withdrawal_processing_time");
+        metrics::histogram!("api.v01.withdrawal_processing_time", start.elapsed());
         ok_json!(processing_time)
     }
 }

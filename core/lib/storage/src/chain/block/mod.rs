@@ -74,7 +74,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         let result = stored.into_op(&mut transaction).await;
 
         transaction.commit().await?;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "execute_operation");
+        metrics::histogram!("sql.chain.block.execute_operation", start.elapsed());
         result
     }
 
@@ -104,10 +104,11 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
                 }
             }
         }
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "save_block_transactions");
+        metrics::histogram!("sql.chain.block.save_block_transactions", start.elapsed());
         Ok(())
     }
 
+    // Helper method for retrieving blocks from the database.
     async fn get_storage_block(&mut self, block: BlockNumber) -> QueryResult<Option<StorageBlock>> {
         let start = Instant::now();
         let block = sqlx::query_as!(
@@ -118,7 +119,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         .fetch_optional(self.0.conn())
         .await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_storage_block");
+        metrics::histogram!("sql.chain.block.get_storage_block", start.elapsed());
 
         Ok(block)
     }
@@ -156,7 +157,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
             U256::from(stored_block.verify_gas_limit as u64),
         ));
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_block");
+        metrics::histogram!("sql.chain.block.get_block", start.elapsed());
 
         Ok(result)
     }
@@ -173,10 +174,11 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
                 ExecutedOperations::PriorityOp(priorop) => Some(priorop.op),
             })
             .collect();
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_block_operations");
+        metrics::histogram!("sql.chain.block.get_block_operations", start.elapsed());
         Ok(result)
     }
 
+    /// Retrieves both L1 and L2 operations stored in the block with the given number.
     pub async fn get_block_transactions(
         &mut self,
         block: BlockNumber,
@@ -225,7 +227,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         .fetch_all(self.0.conn())
         .await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_block_transactions");
+        metrics::histogram!("sql.chain.block.get_block_transactions", start.elapsed());
         Ok(block_txs)
     }
 
@@ -288,7 +290,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
             }
         });
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_block_executed_ops");
+        metrics::histogram!("sql.chain.block.get_block_executed_ops", start.elapsed());
         Ok(executed_operations)
     }
 
@@ -344,7 +346,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         ).fetch_all(self.0.conn())
         .await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "load_block_range");
+        metrics::histogram!("sql.chain.block.load_block_range", start.elapsed());
         Ok(details)
     }
 
@@ -453,9 +455,8 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
             .flatten();
 
         metrics::histogram!(
-            "sql.chain",
-            start.elapsed(),
-            "block" => "find_block_by_height_or_hash"
+            "sql.chain.block.find_block_by_height_or_hash",
+            start.elapsed()
         );
         result
     }
@@ -470,7 +471,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         } else {
             None
         };
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "load_commit_op");
+        metrics::histogram!("sql.chain.block.load_commit_op", start.elapsed());
         result
     }
 
@@ -484,7 +485,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         let result = OperationsSchema(self.0)
             .get_last_block_by_action(ActionType::COMMIT, None)
             .await;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_last_committed_block");
+        metrics::histogram!("sql.chain.block.get_last_committed_block", start.elapsed());
         result
     }
 
@@ -498,7 +499,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         let result = OperationsSchema(self.0)
             .get_last_block_by_action(ActionType::VERIFY, None)
             .await;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_last_verified_block");
+        metrics::histogram!("sql.chain.block.get_last_verified_block", start.elapsed());
         result
     }
 
@@ -509,10 +510,14 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         let result = OperationsSchema(self.0)
             .get_last_block_by_action(ActionType::VERIFY, Some(true))
             .await;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "get_last_verified_confirmed_block");
+        metrics::histogram!(
+            "sql.chain.block.get_last_verified_confirmed_block",
+            start.elapsed()
+        );
         result
     }
 
+    /// Helper method for retrieving pending blocks from the database.
     async fn load_storage_pending_block(&mut self) -> QueryResult<Option<StoragePendingBlock>> {
         let start = Instant::now();
         let maybe_block = sqlx::query_as!(
@@ -523,11 +528,15 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         )
         .fetch_optional(self.0.conn())
         .await?;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "load_storage_pending_block");
+        metrics::histogram!(
+            "sql.chain.block.load_storage_pending_block",
+            start.elapsed()
+        );
 
         Ok(maybe_block)
     }
 
+    /// Retrieves the latest pending block from the database, if such is present.
     pub async fn load_pending_block(&mut self) -> QueryResult<Option<PendingBlock>> {
         let start = Instant::now();
         let mut transaction = self.0.start_transaction().await?;
@@ -540,7 +549,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
             Some(block) => block,
             None => return Ok(None),
         };
-
+        // Fill the block that's going to be returned with its operations.
         let executed_ops = BlockSchema(&mut transaction)
             .get_block_executed_ops(block.number as u32)
             .await?;
@@ -565,7 +574,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
 
         transaction.commit().await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "load_pending_block");
+        metrics::histogram!("sql.chain.block.load_pending_block", start.elapsed());
         Ok(Some(result))
     }
 
@@ -576,6 +585,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         Ok(result)
     }
 
+    /// Stores given pending block into the database.
     pub async fn save_pending_block(&mut self, pending_block: PendingBlock) -> QueryResult<()> {
         let start = Instant::now();
         let mut transaction = self.0.start_transaction().await?;
@@ -615,11 +625,12 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
             .await?;
 
         transaction.commit().await?;
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "load_pending_block");
+        metrics::histogram!("sql.chain.block.load_pending_block", start.elapsed());
 
         Ok(())
     }
 
+    /// Returns the number of operations with the given `action_type` and `is_confirmed` status.
     pub async fn count_operations(
         &mut self,
         action_type: ActionType,
@@ -687,7 +698,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
 
         transaction.commit().await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "save_block");
+        metrics::histogram!("sql.chain.block.save_block", start.elapsed());
         Ok(())
     }
 
@@ -715,7 +726,7 @@ impl<'a, 'c> BlockSchema<'a, 'c> {
         .execute(self.0.conn())
         .await?;
 
-        metrics::histogram!("sql.chain", start.elapsed(), "block" => "store_account_tree_cache");
+        metrics::histogram!("sql.chain.block.store_account_tree_cache", start.elapsed());
         Ok(())
     }
 

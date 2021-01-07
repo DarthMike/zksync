@@ -7,6 +7,7 @@ use zksync_types::{
     Address, SignedZkSyncTx, ZkSyncTx,
 };
 // Local imports
+use crate::test_data::gen_eth_sign_data;
 use crate::tests::db_test;
 use crate::{
     chain::{
@@ -15,8 +16,6 @@ use crate::{
     },
     QueryResult, StorageProcessor,
 };
-
-use crate::tests::chain::utils::get_eth_sign_data;
 
 /// Generates several different `SignedFranlinTx` objects.
 fn franklin_txs() -> Vec<SignedZkSyncTx> {
@@ -79,7 +78,7 @@ fn franklin_txs() -> Vec<SignedZkSyncTx> {
 
             SignedZkSyncTx {
                 tx: tx.clone(),
-                eth_sign_data: Some(get_eth_sign_data(test_message)),
+                eth_sign_data: Some(gen_eth_sign_data(test_message)),
             }
         })
         .collect()
@@ -106,7 +105,7 @@ fn gen_transfers(n: usize) -> Vec<SignedZkSyncTx> {
 
             SignedZkSyncTx {
                 tx: ZkSyncTx::Transfer(Box::new(transfer)),
-                eth_sign_data: Some(get_eth_sign_data(test_message)),
+                eth_sign_data: Some(gen_eth_sign_data(test_message)),
             }
         })
         .collect()
@@ -162,7 +161,7 @@ async fn store_load_batch(mut storage: StorageProcessor<'_>) -> QueryResult<()> 
     let alone_txs_2 = &txs[6..8];
     let batch_3 = &txs[8..10];
 
-    let batch_1_signature = Some(get_eth_sign_data("test message".to_owned()).signature);
+    let batch_1_signature = Some(gen_eth_sign_data("test message".to_owned()).signature);
 
     let elements_count = alone_txs_1.len() + alone_txs_2.len() + 3; // Amount of alone txs + amount of batches.
 
@@ -283,6 +282,56 @@ async fn collect_garbage(mut storage: StorageProcessor<'_>) -> QueryResult<()> {
 
     for (expected_hash, tx_from_db) in retained_hashes.iter().zip(txs_from_db) {
         assert_eq!(*expected_hash, unwrap_tx(tx_from_db).hash());
+    }
+
+    Ok(())
+}
+
+/// Checks that memory pool contains previously inserted transaction.
+#[db_test]
+async fn contains_and_get_tx(mut storage: StorageProcessor<'_>) -> QueryResult<()> {
+    let txs = gen_transfers(5);
+
+    // Make sure that the mempool responds that these transactions are missing.
+    for tx in &txs {
+        let tx_hash = tx.hash();
+
+        assert_eq!(
+            MempoolSchema(&mut storage).contains_tx(tx_hash).await?,
+            false
+        );
+        assert!(MempoolSchema(&mut storage).get_tx(tx_hash).await?.is_none());
+    }
+
+    // Submit transactions.
+    {
+        let single_tx = &txs[0];
+
+        let batch = &txs[1..];
+        let batch_signature = Some(gen_eth_sign_data("test message".to_owned()).signature);
+
+        let mut mempool = MempoolSchema(&mut storage);
+        mempool.insert_tx(single_tx).await?;
+        mempool.insert_batch(batch, batch_signature).await?;
+    }
+
+    // Make sure that the memory pool now responds that these transactions exist.
+    for tx in &txs {
+        let tx_hash = tx.hash();
+
+        assert_eq!(
+            MempoolSchema(&mut storage).contains_tx(tx_hash).await?,
+            true
+        );
+        assert_eq!(
+            MempoolSchema(&mut storage)
+                .get_tx(tx_hash)
+                .await?
+                .as_ref()
+                .unwrap()
+                .hash(),
+            tx_hash,
+        );
     }
 
     Ok(())

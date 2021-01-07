@@ -121,8 +121,16 @@ pub struct TokenPrice {
     pub last_updated: DateTime<Utc>,
 }
 
+/// Token price known to the zkSync network.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenMarketVolume {
+    #[serde(with = "UnsignedRatioSerializeAsDecimal")]
+    pub market_volume: Ratio<BigUint>,
+    pub last_updated: DateTime<Utc>,
+}
+
 /// Type of transaction fees that exist in the zkSync network.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Hash, Eq)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Hash, Eq)]
 pub enum TxFeeTypes {
     /// Fee for the `Withdraw` or `ForcedExit` transaction.
     Withdraw,

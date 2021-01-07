@@ -1239,6 +1239,65 @@
       ]
     }
   },
+  "46af96293f56bf9ea5608b0be88618a5487c5056f2ed588c8e69bd033c8d14fb": {
+    "query": "\n                    WITH block_details AS (\n                        WITH eth_ops AS (\n                            SELECT DISTINCT ON (block_number, action_type)\n                                operations.block_number,\n                                eth_tx_hashes.tx_hash,\n                                operations.action_type,\n                                operations.created_at,\n                                confirmed\n                            FROM operations\n                                left join eth_ops_binding on eth_ops_binding.op_id = operations.id\n                                left join eth_tx_hashes on eth_tx_hashes.eth_op_id = eth_ops_binding.eth_op_id\n                            ORDER BY block_number DESC, action_type, confirmed\n                        )\n                        SELECT\n                            blocks.number AS details_block_number,\n                            committed.tx_hash AS commit_tx_hash,\n                            verified.tx_hash AS verify_tx_hash\n                        FROM blocks\n                        INNER JOIN eth_ops committed ON\n                            committed.block_number = blocks.number AND committed.action_type = 'COMMIT' AND committed.confirmed = true\n                        LEFT JOIN eth_ops verified ON\n                            verified.block_number = blocks.number AND verified.action_type = 'VERIFY' AND verified.confirmed = true\n                    )\n                    SELECT\n                        block_number, \n                        block_index as \"block_index?\",\n                        tx_hash,\n                        success,\n                        fail_reason as \"fail_reason?\",\n                        details.commit_tx_hash as \"commit_tx_hash?\",\n                        details.verify_tx_hash as \"verify_tx_hash?\"\n                    FROM executed_transactions\n                    LEFT JOIN block_details details ON details.details_block_number = executed_transactions.block_number\n                    WHERE (\n                        (primary_account_address = $1 OR from_account = $1 OR to_account = $1)\n                        AND (\n                            block_number = $2 AND (\n                                COALESCE(block_index, -1) >= $3\n                            ) OR (\n                                block_number > $2\n                            )\n                        )\n                    )\n                    ORDER BY block_number ASC, COALESCE(block_index, -1) ASC\n                    LIMIT $4\n                    ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "block_number",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "block_index?",
+          "type_info": "Int4"
+        },
+        {
+          "ordinal": 2,
+          "name": "tx_hash",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 3,
+          "name": "success",
+          "type_info": "Bool"
+        },
+        {
+          "ordinal": 4,
+          "name": "fail_reason?",
+          "type_info": "Text"
+        },
+        {
+          "ordinal": 5,
+          "name": "commit_tx_hash?",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 6,
+          "name": "verify_tx_hash?",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Bytea",
+          "Int8",
+          "Int4",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false
+      ]
+    }
+  },
   "478f49f85e110310657f9db74aaa103a63230855db1fe7eb43f030db95e88f5e": {
     "query": "\n            with eth_ops as (\n                select distinct on (block_number, action_type)\n                    operations.block_number,\n                    operations.action_type,\n                    confirmed\n                from operations\n                order by block_number desc, action_type, confirmed\n            ), transactions as (\n                select\n                    *\n                from (\n                    select\n                        concat_ws(',', block_number, block_index) as tx_id,\n                        tx,\n                        'sync-tx:' || encode(tx_hash, 'hex') as hash,\n                        null as pq_id,\n                        null as eth_block,\n                        success,\n                        fail_reason,\n                        block_number,\n                        created_at\n                    from\n                        executed_transactions\n                    where\n                        (\n                            from_account = $1\n                            or\n                            to_account = $1\n                            or\n                            primary_account_address = $1\n                        )\n                        and\n                        (block_number BETWEEN $3 AND $4 or (block_number = $2 and block_index BETWEEN $5 AND $6))\n                    union all\n                    select\n                        concat_ws(',', block_number, block_index) as tx_id,\n                        operation as tx,\n                        '0x' || encode(eth_hash, 'hex') as hash,\n                        priority_op_serialid as pq_id,\n                        eth_block,\n                        true as success,\n                        null as fail_reason,\n                        block_number,\n                        created_at\n                    from \n                        executed_priority_operations\n                    where \n                        (\n                            from_account = $1\n                            or\n                            to_account = $1\n                        )\n                        and\n                        (block_number BETWEEN $3 AND $4 or (block_number = $2 and block_index BETWEEN $5 AND $6))\n                    ) t\n                order by\n                    block_number desc, created_at desc\n                limit \n                    $7\n            )\n            select\n                tx_id as \"tx_id!\",\n                hash as \"hash?\",\n                eth_block as \"eth_block?\",\n                pq_id as \"pq_id?\",\n                tx as \"tx!\",\n                success as \"success?\",\n                fail_reason as \"fail_reason?\",\n                true as \"commited!\",\n                coalesce(verified.confirmed, false) as \"verified!\",\n                created_at as \"created_at!\"\n            from transactions\n            left join eth_ops committed on\n                committed.block_number = transactions.block_number and committed.action_type = 'COMMIT' and committed.confirmed = true\n            left join eth_ops verified on\n                verified.block_number = transactions.block_number and verified.action_type = 'VERIFY' and verified.confirmed = true\n            order by transactions.block_number desc, created_at desc\n            ",
     "describe": {
@@ -1316,6 +1375,38 @@
         null,
         null,
         null
+      ]
+    }
+  },
+  "4a0bc713a57201aa894b96acdb462c03d3ad63cf4fbc8a14b9ac5e2e02121207": {
+    "query": "\n            SELECT * FROM ticker_market_volume\n            WHERE token_id = $1\n            LIMIT 1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "token_id",
+          "type_info": "Int4"
+        },
+        {
+          "ordinal": 1,
+          "name": "market_volume",
+          "type_info": "Numeric"
+        },
+        {
+          "ordinal": 2,
+          "name": "last_updated",
+          "type_info": "Timestamptz"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int4"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false
       ]
     }
   },
@@ -1521,6 +1612,97 @@
       ]
     }
   },
+  "57b925d9473fe70e2d24618724eaf17853cd5e338853bb2636ecb128cdf20e93": {
+    "query": "\n                    WITH block_details AS (\n                        WITH eth_ops AS (\n                            SELECT DISTINCT ON (block_number, action_type)\n                                operations.block_number,\n                                eth_tx_hashes.tx_hash,\n                                operations.action_type,\n                                operations.created_at,\n                                confirmed\n                            FROM operations\n                                left join eth_ops_binding on eth_ops_binding.op_id = operations.id\n                                left join eth_tx_hashes on eth_tx_hashes.eth_op_id = eth_ops_binding.eth_op_id\n                            ORDER BY block_number DESC, action_type, confirmed\n                        )\n                        SELECT\n                            blocks.number AS details_block_number,\n                            committed.tx_hash AS commit_tx_hash,\n                            verified.tx_hash AS verify_tx_hash\n                        FROM blocks\n                        INNER JOIN eth_ops committed ON\n                            committed.block_number = blocks.number AND committed.action_type = 'COMMIT' AND committed.confirmed = true\n                        LEFT JOIN eth_ops verified ON\n                            verified.block_number = blocks.number AND verified.action_type = 'VERIFY' AND verified.confirmed = true\n                    )\n                    SELECT\n                        block_number, \n                        block_index,\n                        eth_hash,\n                        details.commit_tx_hash as \"commit_tx_hash?\",\n                        details.verify_tx_hash as \"verify_tx_hash?\"\n                    FROM executed_priority_operations\n                    LEFT JOIN block_details details ON details.details_block_number = executed_priority_operations.block_number\n                    WHERE (\n                        (from_account = $1 OR to_account = $1)\n                        AND (\n                            block_number = $2 AND (\n                                block_index >= $3\n                            ) OR (\n                                block_number > $2\n                            )\n                        )\n                    )\n                    ORDER BY block_number ASC, block_index ASC\n                    LIMIT $4\n                    ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "block_number",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "block_index",
+          "type_info": "Int4"
+        },
+        {
+          "ordinal": 2,
+          "name": "eth_hash",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 3,
+          "name": "commit_tx_hash?",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 4,
+          "name": "verify_tx_hash?",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Bytea",
+          "Int8",
+          "Int4",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
+  "59c4e0d8255c2e4dd6eece1b24245daf3414d4f15b6cba7b369dc1ac32bed018": {
+    "query": "\n                SELECT * FROM accounts\n                WHERE id = $1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "id",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "last_block",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 2,
+          "name": "nonce",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 3,
+          "name": "address",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 4,
+          "name": "pubkey_hash",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false,
+        false,
+        false
+      ]
+    }
+  },
   "5de811d61e00fd7b93311aa825d17e2b2f0ee46ee762f5064e842f5d0f2b5ad7": {
     "query": "UPDATE eth_parameters\n            SET commit_ops = $1, verify_ops = $2, withdraw_ops = $3\n            WHERE id = true",
     "describe": {
@@ -1633,6 +1815,26 @@
         false,
         false,
         false
+      ]
+    }
+  },
+  "60cf573e253358218a6319233221e8c2ff0561fd7ffbf8339a11a4509d955442": {
+    "query": "SELECT count(*) from mempool_txs\n            WHERE tx_hash = $1",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "count",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Text"
+        ]
+      },
+      "nullable": [
+        null
       ]
     }
   },
@@ -1794,6 +1996,106 @@
         false,
         false,
         false,
+        false
+      ]
+    }
+  },
+  "74a5cc4affa23433b5b7834df6dfa1a7a2c5a65f23289de3de5a4f1b93f89c06": {
+    "query": "SELECT address FROM account_creates WHERE account_id = $1",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "address",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false
+      ]
+    }
+  },
+  "77c239c9281966dbae79b1eee83bb0cd94f6c20dc08db9cadd10d9b914fc5bf5": {
+    "query": "\n                    WITH block_details AS (\n                        WITH eth_ops AS (\n                            SELECT DISTINCT ON (block_number, action_type)\n                                operations.block_number,\n                                eth_tx_hashes.tx_hash,\n                                operations.action_type,\n                                operations.created_at,\n                                confirmed\n                            FROM operations\n                                left join eth_ops_binding on eth_ops_binding.op_id = operations.id\n                                left join eth_tx_hashes on eth_tx_hashes.eth_op_id = eth_ops_binding.eth_op_id\n                            ORDER BY block_number DESC, action_type, confirmed\n                        )\n                        SELECT\n                            blocks.number AS details_block_number,\n                            committed.tx_hash AS commit_tx_hash,\n                            verified.tx_hash AS verify_tx_hash\n                        FROM blocks\n                        INNER JOIN eth_ops committed ON\n                            committed.block_number = blocks.number AND committed.action_type = 'COMMIT' AND committed.confirmed = true\n                        LEFT JOIN eth_ops verified ON\n                            verified.block_number = blocks.number AND verified.action_type = 'VERIFY' AND verified.confirmed = true\n                    )\n                    SELECT\n                        block_number, \n                        block_index as \"block_index?\",\n                        tx_hash,\n                        success,\n                        fail_reason as \"fail_reason?\",\n                        details.commit_tx_hash as \"commit_tx_hash?\",\n                        details.verify_tx_hash as \"verify_tx_hash?\"\n                    FROM executed_transactions\n                    LEFT JOIN block_details details ON details.details_block_number = executed_transactions.block_number\n                    WHERE (\n                        (primary_account_address = $1 OR from_account = $1 OR to_account = $1)\n                        AND (\n                            block_number = $2 AND (\n                                COALESCE(block_index, -1) <= $3\n                            ) OR (\n                                block_number < $2\n                            )\n                        )\n                    )\n                    ORDER BY block_number DESC, COALESCE(block_index, -1) DESC\n                    LIMIT $4\n                    ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "block_number",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "block_index?",
+          "type_info": "Int4"
+        },
+        {
+          "ordinal": 2,
+          "name": "tx_hash",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 3,
+          "name": "success",
+          "type_info": "Bool"
+        },
+        {
+          "ordinal": 4,
+          "name": "fail_reason?",
+          "type_info": "Text"
+        },
+        {
+          "ordinal": 5,
+          "name": "commit_tx_hash?",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 6,
+          "name": "verify_tx_hash?",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Bytea",
+          "Int8",
+          "Int4",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        true,
+        false,
+        false,
+        true,
+        false,
+        false
+      ]
+    }
+  },
+  "790d46519ceaa7fbd152f1edf29b85c97ab491488b7302d8df3f57e5fc3eff55": {
+    "query": "\n                SELECT account_id FROM account_creates\n                WHERE address = $1 AND is_create = $2\n                ORDER BY block_number desc\n                LIMIT 1\n            ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "account_id",
+          "type_info": "Int8"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Bytea",
+          "Bool"
+        ]
+      },
+      "nullable": [
         false
       ]
     }
@@ -1990,6 +2292,53 @@
         "Left": []
       },
       "nullable": [
+        false,
+        false
+      ]
+    }
+  },
+  "8a318f9badab6714d127790827883245909df798021d39ba4981e98b9dffa366": {
+    "query": "\n                    WITH block_details AS (\n                        WITH eth_ops AS (\n                            SELECT DISTINCT ON (block_number, action_type)\n                                operations.block_number,\n                                eth_tx_hashes.tx_hash,\n                                operations.action_type,\n                                operations.created_at,\n                                confirmed\n                            FROM operations\n                                left join eth_ops_binding on eth_ops_binding.op_id = operations.id\n                                left join eth_tx_hashes on eth_tx_hashes.eth_op_id = eth_ops_binding.eth_op_id\n                            ORDER BY block_number DESC, action_type, confirmed\n                        )\n                        SELECT\n                            blocks.number AS details_block_number,\n                            committed.tx_hash AS commit_tx_hash,\n                            verified.tx_hash AS verify_tx_hash\n                        FROM blocks\n                        INNER JOIN eth_ops committed ON\n                            committed.block_number = blocks.number AND committed.action_type = 'COMMIT' AND committed.confirmed = true\n                        LEFT JOIN eth_ops verified ON\n                            verified.block_number = blocks.number AND verified.action_type = 'VERIFY' AND verified.confirmed = true\n                    )\n                    SELECT\n                        block_number, \n                        block_index,\n                        eth_hash,\n                        details.commit_tx_hash as \"commit_tx_hash?\",\n                        details.verify_tx_hash as \"verify_tx_hash?\"\n                    FROM executed_priority_operations\n                    LEFT JOIN block_details details ON details.details_block_number = executed_priority_operations.block_number\n                    WHERE (\n                        (from_account = $1 OR to_account = $1)\n                        AND (\n                            block_number = $2 AND (\n                                block_index <= $3\n                            ) OR (\n                                block_number < $2\n                            )\n                        )\n                    )\n                    ORDER BY block_number DESC, block_index DESC\n                    LIMIT $4\n                    ",
+    "describe": {
+      "columns": [
+        {
+          "ordinal": 0,
+          "name": "block_number",
+          "type_info": "Int8"
+        },
+        {
+          "ordinal": 1,
+          "name": "block_index",
+          "type_info": "Int4"
+        },
+        {
+          "ordinal": 2,
+          "name": "eth_hash",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 3,
+          "name": "commit_tx_hash?",
+          "type_info": "Bytea"
+        },
+        {
+          "ordinal": 4,
+          "name": "verify_tx_hash?",
+          "type_info": "Bytea"
+        }
+      ],
+      "parameters": {
+        "Left": [
+          "Bytea",
+          "Int8",
+          "Int4",
+          "Int8"
+        ]
+      },
+      "nullable": [
+        false,
+        false,
+        false,
         false,
         false
       ]
@@ -3121,6 +3470,20 @@
       "nullable": []
     }
   },
+  "ceb8e4656aa76e1918a03707a1f047aed19ffcb3c70dbde61a6353b26b5a2493": {
+    "query": "\n            INSERT INTO ticker_market_volume ( token_id, market_volume, last_updated )\n            VALUES ( $1, $2, $3 )\n            ON CONFLICT (token_id)\n            DO\n              UPDATE SET market_volume = $2, last_updated = $3\n            ",
+    "describe": {
+      "columns": [],
+      "parameters": {
+        "Left": [
+          "Int4",
+          "Numeric",
+          "Timestamptz"
+        ]
+      },
+      "nullable": []
+    }
+  },
   "d8d94a30a654bf70f4465b9c33cf06cd14833ba35644db0f8d15182b64b04550": {
     "query": "INSERT INTO complete_withdrawals_transactions (tx_hash, pending_withdrawals_queue_start_index, pending_withdrawals_queue_end_index)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (tx_hash)\n            DO UPDATE\n            SET tx_hash = $1, pending_withdrawals_queue_start_index = $2, pending_withdrawals_queue_end_index = $3",
     "describe": {
@@ -3135,8 +3498,8 @@
       "nullable": []
     }
   },
-  "ddf29a55c76cb7c56286ef5a7095e44b350cf9b6dcf88b67f399483f76b8f36f": {
-    "query": "\n                SELECT * FROM accounts\n                WHERE id = $1\n                LIMIT 1\n            ",
+  "debbe23f0c730c331482c798387d1739911923edcafc2bd80463464ff98f3b71": {
+    "query": "SELECT * from mempool_txs\n            WHERE tx_hash = $1",
     "describe": {
       "columns": [
         {
@@ -3146,28 +3509,33 @@
         },
         {
           "ordinal": 1,
-          "name": "last_block",
-          "type_info": "Int8"
+          "name": "tx_hash",
+          "type_info": "Text"
         },
         {
           "ordinal": 2,
-          "name": "nonce",
-          "type_info": "Int8"
+          "name": "tx",
+          "type_info": "Jsonb"
         },
         {
           "ordinal": 3,
-          "name": "address",
-          "type_info": "Bytea"
+          "name": "created_at",
+          "type_info": "Timestamptz"
         },
         {
           "ordinal": 4,
-          "name": "pubkey_hash",
-          "type_info": "Bytea"
+          "name": "eth_sign_data",
+          "type_info": "Jsonb"
+        },
+        {
+          "ordinal": 5,
+          "name": "batch_id",
+          "type_info": "Int8"
         }
       ],
       "parameters": {
         "Left": [
-          "Int8"
+          "Text"
         ]
       },
       "nullable": [
@@ -3175,6 +3543,7 @@
         false,
         false,
         false,
+        true,
         false
       ]
     }

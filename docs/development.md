@@ -53,12 +53,13 @@ zk down # Shut down `geth` and `postgres` containers
 
 ## Committing changes
 
-`zksync` uses pre-commit git hooks for basic code integrity checks. Hooks are set up automatically within the workspace
-initialization process. These hooks will not allow to commit the code which does not pass several checks.
+`zksync` uses pre-commit and pre-push git hooks for basic code integrity checks. Hooks are set up automatically within
+the workspace initialization process. These hooks will not allow to commit the code which does not pass several checks.
 
 Currently the following criteria are checked:
 
-- Code should always be formatted via `cargo fmt`.
+- Rust code should always be formatted via `cargo fmt`.
+- Other code should always be formatted via `zk fmt`.
 - Dummy Prover should not be staged for commit (see below for the explanation).
 
 ## Using Dummy Prover
@@ -134,7 +135,7 @@ zk test db
 - Running the `rust` unit-tests (heavy tests such as ones for `circuit` and database will not be run):
 
   ```sh
-  f cargo test
+  zk f cargo test
   ```
 
 - Running the database tests:
@@ -166,7 +167,7 @@ zk test db
 - Running the benchmarks:
 
   ```sh
-  f cargo bench
+  zk f cargo bench
   ```
 
 - Running the loadtest:
@@ -176,6 +177,9 @@ zk test db
   zk prover # Has to be run in the 2nd terminal
   zk run loadtest # Has to be run in the 3rd terminal
   ```
+
+  **Note**. If you have compilation issues with `sqlx`, then make sure to run `zk up` before running the tests. Also, if
+  you see some tests fail, might need to call `zk db reset` and restart the tests.
 
 ## Developing circuit
 
