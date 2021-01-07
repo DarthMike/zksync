@@ -37,6 +37,7 @@
         "tests": "mocha -r ts-node/register tests/**/*.test.ts",
         "build": "tsc",
         "watch": "tsc --watch",
-        "prepublish": "yarn build && rollup -c"
+        "prepublish": "yarn build && rollup -c",
+        "export": "browserify js-export.js -s ZKSync -o zksync-bundle.js"
     }
 }
